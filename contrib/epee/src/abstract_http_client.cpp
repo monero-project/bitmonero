@@ -142,6 +142,13 @@ namespace http
   {
     return false;
   }
+
+  std::error_code epee::net_utils::http::abstract_http_client::last_error()
+  {
+    if (is_connected())
+      return std::error_code{};
+    return make_error_code(std::errc::not_connected);
+  }
 }
 }
 }

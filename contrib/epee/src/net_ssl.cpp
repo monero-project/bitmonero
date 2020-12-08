@@ -470,7 +470,7 @@ bool ssl_options_t::has_fingerprint(boost::asio::ssl::verify_context &ctx) const
   return false;
 }
 
-bool ssl_options_t::handshake(
+boost::system::error_code ssl_options_t::handshake(
   boost::asio::ssl::stream<boost::asio::ip::tcp::socket> &socket,
   boost::asio::ssl::stream_base::handshake_type type,
   const std::string& host,
@@ -545,12 +545,10 @@ bool ssl_options_t::handshake(
   }
 
   if (ec)
-  {
     MERROR("SSL handshake failed, connection dropped: " << ec.message());
-    return false;
-  }
-  MDEBUG("SSL handshake success");
-  return true;
+  else
+    MDEBUG("SSL handshake success");
+  return ec;
 }
 
 bool ssl_support_from_string(ssl_support_t &ssl, boost::string_ref s)

@@ -135,7 +135,7 @@ class connection_basic { // not-templated base class for rapid developmet of som
 		bool handshake(boost::asio::ssl::stream_base::handshake_type type)
 		{
 			//m_state != nullptr verified in constructor
-			return m_state->ssl_options().handshake(socket_, type);
+			return !bool(m_state->ssl_options().handshake(socket_, type));
 		}
 
 		template<typename MutableBufferSequence, typename ReadHandler>

@@ -4760,10 +4760,11 @@ bool simple_wallet::try_connect_to_daemon(bool silent, uint32_t* version)
   uint32_t version_ = 0;
   if (!version)
     version = &version_;
-  if (!m_wallet->check_connection(version))
+  expect<void> status{};
+  if (!(status = m_wallet->check_connection(version)))
   {
     if (!silent)
-      fail_msg_writer() << tr("wallet failed to connect to daemon: ") << m_wallet->get_daemon_address() << ". " <<
+      fail_msg_writer() << tr("wallet failed to connect to daemon ") << m_wallet->get_daemon_address() << " : " << status.error().message() << ". " <<
         tr("Daemon either is not started or wrong port was passed. "
         "Please make sure daemon is running or change the daemon address using the 'set_daemon' command.");
     return false;

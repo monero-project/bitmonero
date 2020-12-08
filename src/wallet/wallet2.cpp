@@ -5518,7 +5518,7 @@ bool wallet2::prepare_file_names(const std::string& file_path)
   return true;
 }
 //----------------------------------------------------------------------------------------------------
-bool wallet2::check_connection(uint32_t *version, bool *ssl, uint32_t timeout)
+expect<void> wallet2::check_connection(uint32_t *version, bool *ssl, uint32_t timeout)
 {
   THROW_WALLET_EXCEPTION_IF(!m_is_initialized, error::wallet_not_initialized);
 
@@ -5529,7 +5529,7 @@ bool wallet2::check_connection(uint32_t *version, bool *ssl, uint32_t timeout)
       *version = 0;
     if (ssl)
       *ssl = false;
-    return false;
+    return make_error_code(std::errc::not_connected);
   }
 
   // TODO: Add light wallet version check.
@@ -5539,7 +5539,7 @@ bool wallet2::check_connection(uint32_t *version, bool *ssl, uint32_t timeout)
         *version = 0;
       if (ssl)
         *ssl = m_light_wallet_connected; // light wallet is always SSL
-      return m_light_wallet_connected;
+      return m_light_wallet_connected ? std::error_code{} : make_error_code(std::errc::not_connected);
   }
 
   {
@@ -5548,10 +5548,8 @@ bool wallet2::check_connection(uint32_t *version, bool *ssl, uint32_t timeout)
     {
       m_rpc_version = 0;
       m_node_rpc_proxy.invalidate();
-      if (!m_http_client->connect(std::chrono::milliseconds(timeout)))
-        return false;
-      if(!m_http_client->is_connected(ssl))
-        return false;
+      if (!m_http_client->connect(std::chrono::milliseconds(timeout)) || !m_http_client->is_connected(ssl))
+        return m_http_client->last_error();
     }
   }
 
@@ -5563,14 +5561,14 @@ bool wallet2::check_connection(uint32_t *version, bool *ssl, uint32_t timeout)
     if(!r || resp_t.status != CORE_RPC_STATUS_OK) {
       if(version)
         *version = 0;
-      return false;
+      return make_error_code(std::errc::protocol_error);
     }
     m_rpc_version = resp_t.version;
   }
   if (version)
     *version = m_rpc_version;
 
-  return true;
+  return success();
 }
 //----------------------------------------------------------------------------------------------------
 void wallet2::set_offline(bool offline)

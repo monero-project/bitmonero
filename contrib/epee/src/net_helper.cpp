@@ -1,7 +1,47 @@
+// Copyright (c) 2019-2020, The Monero Project
+//
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without modification, are
+// permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this list of
+//    conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice, this list
+//    of conditions and the following disclaimer in the documentation and/or other
+//    materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its contributors may be
+//    used to endorse or promote products derived from this software without specific
+//    prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
+// THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+// STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+// THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
 #include "net/net_helper.h"
+#include <boost/version.hpp>
 
 namespace epee
 {
+std::error_code convert_error_code(boost::system::error_code error)
+{
+#if BOOST_VERSION >= 106500
+	return error; // builtin conversion from boost in 1.65+
+#else
+	if (error)
+		return make_error_code(std::errc::not_connected);
+	return std::error_code{};
+#endif
+}
+
 namespace net_utils
 {
 	boost::unique_future<boost::asio::ip::tcp::socket>
@@ -77,6 +117,85 @@ namespace net_utils
 			}
 		});
 		return shared->result_.get_future();
+	}
+
+	boost::system::error_code blocked_mode_client::try_connect(const std::string& addr, const std::string& port, std::chrono::milliseconds timeout)
+	{
+		m_deadline.expires_from_now(timeout);
+		boost::unique_future<boost::asio::ip::tcp::socket> connection = m_connector(addr, port, m_deadline);
+		for (;;)
+		{
+			m_io_service.reset();
+			m_io_service.run_one();
+
+			if (connection.is_ready())
+				break;
+		}
+
+		m_ssl_socket->next_layer() = connection.get();
+		m_deadline.cancel();
+		if (m_ssl_socket->next_layer().is_open())
+		{
+			boost::system::error_code error{};
+			m_deadline.expires_at(std::chrono::steady_clock::time_point::max());
+			// SSL Options
+			if (m_ssl_options.support == ssl_support_t::e_ssl_support_enabled || m_ssl_options.support == ssl_support_t::e_ssl_support_autodetect)
+			{
+				if ((error = m_ssl_options.handshake(*m_ssl_socket, boost::asio::ssl::stream_base::client, addr, timeout)))
+				{
+					MWARNING("Failed to establish SSL connection");
+					boost::system::error_code ignored_ec;
+					m_ssl_socket->next_layer().shutdown(boost::asio::ip::tcp::socket::shutdown_both, ignored_ec);
+					m_ssl_socket->next_layer().close();
+				}
+			}
+			return error;
+		}
+
+		MWARNING("Some problems at connect, expected open socket");
+		return boost::asio::error::not_connected;
+	}
+
+	bool blocked_mode_client::connect(const std::string& addr, const std::string& port, std::chrono::milliseconds timeout)
+	{
+		try
+		{
+			disconnect();
+
+			// Set SSL options
+			// disable sslv2
+			m_ssl_socket.reset(new boost::asio::ssl::stream<boost::asio::ip::tcp::socket>(m_io_service, m_ctx));
+
+			boost::system::error_code error = try_connect(addr, port, timeout);
+			if (error && error != boost::asio::error::not_connected && m_ssl_options.support == ssl_support_t::e_ssl_support_autodetect)
+			{
+				MERROR("SSL handshake failed on an autodetect connection, reconnecting without SSL");
+				m_ssl_options.support = ssl_support_t::e_ssl_support_disabled;
+				error = try_connect(addr, port, timeout);
+			}
+			m_stream_error = convert_error_code(error);
+		}
+		catch (const std::system_error& er)
+		{
+			if (er.code())
+				m_stream_error = er.code();
+			MDEBUG("Some problems at connect, message: " << er.what());
+		}
+		catch (const boost::system::system_error& er)
+		{
+			if (er.code())
+				m_stream_error = convert_error_code(er.code());
+			MDEBUG("Some problems at connect, message: " << er.what());
+		}
+		catch(const std::exception& er)
+		{
+			MDEBUG("Some problems at connect, message: " << er.what());
+		}
+		catch(...)
+		{
+			MDEBUG("Some fatal problems.");
+		}
+		return !m_stream_error;
 	}
 }
 }

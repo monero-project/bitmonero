@@ -41,6 +41,7 @@ public:
   bool send(const std::string& buff, std::chrono::milliseconds timeout) { return true; }
   bool send(const void* data, size_t sz) { return true; }
   bool is_connected() { return true; }
+  static std::error_code last_error() noexcept { return {}; }
   bool recv(std::string& buff, std::chrono::milliseconds timeout)
   {
     buff = data;
