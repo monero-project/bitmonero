@@ -6416,6 +6416,10 @@ void simple_wallet::check_for_inactivity_lock(bool user)
     {
       const char *inactivity_msg = user ? "" : tr("Locked due to inactivity.");
       tools::msg_writer() << inactivity_msg << (inactivity_msg[0] ? " " : "") << tr("The wallet password is required to unlock the console.");
+      tools::msg_writer() << tr("Filename: ") << m_wallet->get_wallet_file();
+      tools::msg_writer() << tr("Network type: ") << (
+        m_wallet->nettype() == cryptonote::TESTNET ? tr("Testnet") :
+        m_wallet->nettype() == cryptonote::STAGENET ? tr("Stagenet") : tr("Mainnet"));
       try
       {
         if (get_and_verify_password())
