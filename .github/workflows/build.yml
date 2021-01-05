@@ -149,7 +149,7 @@ jobs:
         DIR_BUILD="build/ci/release"
         DIR_SRC="`pwd`"
         mkdir -p "${DIR_BUILD}" && cd "${DIR_BUILD}"
-        cmake -S "${DIR_SRC}" -D ARCH="default" -D BUILD_SHARED_LIBS=ON -D BUILD_TESTS=ON -D CMAKE_BUILD_TYPE=release && make -j3 && make test
+        cmake -S "${DIR_SRC}" -D ARCH="default" -D BUILD_SHARED_LIBS=ON -D BUILD_TESTS=ON -D CMAKE_BUILD_TYPE=release && make -j3 && MONERO_PARALLEL_TEST_JOBS=2 "${DIR_SRC}"/tests/run-tests-parallel.py
 
 # ARCH="default" (not "native") ensures, that a different execution host can execute binaries compiled elsewhere.
 # BUILD_SHARED_LIBS=ON speeds up the linkage part a bit, reduces size, and is the only place where the dynamic linkage is tested.
