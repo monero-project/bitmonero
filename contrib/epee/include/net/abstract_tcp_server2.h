@@ -81,10 +81,10 @@ namespace net_utils
   /// Represents a single connection from a client.
   template<class t_protocol_handler>
   class connection
-    : public boost::enable_shared_from_this<connection<t_protocol_handler> >,
-    private boost::noncopyable, 
-    public i_service_endpoint,
-    public connection_basic
+    : public std::enable_shared_from_this<connection<t_protocol_handler>>,
+    private boost::noncopyable,
+    public connection_basic, // shared_state shared_ptr must be destroyed after service_endpoint
+    public service_endpoint<t_protocol_handler>
   {
   public:
     typedef typename t_protocol_handler::connection_context t_connection_context;
@@ -120,7 +120,7 @@ namespace net_utils
     // `real_remote` is the actual endpoint (if connection is to proxy, etc.)
     bool start(bool is_income, bool is_multithreaded, network_address real_remote);
 
-    void get_context(t_connection_context& context_){context_ = context;}
+    void get_context(t_connection_context& context_){context_ = get_context();}
 
     void call_back_starter();
     
@@ -139,12 +139,10 @@ namespace net_utils
     virtual bool call_run_once_service_io();
     virtual bool request_callback();
     virtual boost::asio::io_service& get_io_service();
-    virtual bool add_ref();
-    virtual bool release();
     //------------------------------------------------------
     bool do_send_chunk(byte_slice chunk); ///< will send (or queue) a part of data. internal use only
 
-    boost::shared_ptr<connection<t_protocol_handler> > safe_shared_from_this();
+    std::shared_ptr<connection<t_protocol_handler>> safe_shared_from_this() noexcept;
     bool shutdown();
     /// Handle completion of a receive operation.
     void handle_receive(const boost::system::error_code& e,
@@ -165,19 +163,16 @@ namespace net_utils
     /// host connection count tracking
     unsigned int host_count(const std::string &host, int delta = 0);
 
+    const t_connection_context& get_context() const noexcept { return this->context; }
+    t_connection_context& get_context() noexcept { return this->context; }
+
+    const t_protocol_handler& get_protocol_handler() const noexcept { return this->m_protocol_handler; }
+    t_protocol_handler& get_protocol_handler() noexcept { return this->m_protocol_handler; }
+
     /// Buffer for incoming data.
     boost::array<char, 8192> buffer_;
     size_t buffer_ssl_init_fill;
 
-    t_connection_context context;
-
-	// TODO what do they mean about wait on destructor?? --rfree :
-    //this should be the last one, because it could be wait on destructor, while other activities possible on other threads
-    t_protocol_handler m_protocol_handler;
-    //typename t_protocol_handler::config_type m_dummy_config;
-    size_t m_reference_count = 0; // reference count managed through add_ref/release support
-    boost::shared_ptr<connection<t_protocol_handler> > m_self_ref; // the reference to hold
-    critical_section m_self_refs_lock;
     critical_section m_chunking_lock; // held while we add small chunks of the big do_send() to small do_send_chunk()
     critical_section m_shutdown_lock; // held while shutting down
     
@@ -214,7 +209,7 @@ namespace net_utils
     };
 
   public:
-    typedef boost::shared_ptr<connection<t_protocol_handler> > connection_ptr;
+    typedef std::shared_ptr<connection<t_protocol_handler>> connection_ptr;
     typedef typename t_protocol_handler::connection_context t_connection_context;
     /// Construct the server to listen on the specified TCP address and port, and
     /// serve up files from the given directory.
