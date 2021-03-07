@@ -585,6 +585,7 @@ block Blockchain::pop_block_from_blockchain()
 
   CHECK_AND_ASSERT_THROW_MES(m_db->height() > 1, "Cannot pop the genesis block");
 
+  const uint8_t previous_hf_version = get_current_hard_fork_version();
   try
   {
     m_db->pop_block(popped_block, popped_txs);
@@ -647,6 +648,13 @@ block Blockchain::pop_block_from_blockchain()
   crypto::hash top_block_hash = get_tail_id(top_block_height);
   m_tx_pool.on_blockchain_dec(top_block_height, top_block_hash);
   invalidate_block_template_cache();
+
+  const uint8_t new_hf_version = get_current_hard_fork_version();
+  if (new_hf_version != previous_hf_version)
+  {
+    MINFO("Validating txpool for v" << (unsigned)new_hf_version);
+    m_tx_pool.validate(new_hf_version);
+  }
 
   return popped_block;
 }
@@ -4356,6 +4364,12 @@ leave:
   get_difficulty_for_next_block(); // just to cache it
   invalidate_block_template_cache();
 
+  const uint8_t new_hf_version = get_current_hard_fork_version();
+  if (new_hf_version != hf_version)
+  {
+    MINFO("Validating txpool for v" << (unsigned)new_hf_version);
+    m_tx_pool.validate(new_hf_version);
+  }
 
   for (const auto& notifier: m_block_notifiers)
     notifier(new_height - 1, {std::addressof(bl), 1});
