@@ -27,19 +27,15 @@ namespace net_utils
   //----------------------------------------------------------------------------------------------------
   std::string dec_to_hex(char num, int radix)
   {
-    int temp=0;
     std::string csTmp;
-    int num_char;
-
-    num_char = (int) num;
+    int num_char = (int) num;
     if (num_char < 0)
       num_char = 256 + num_char;
 
     while (num_char >= radix)
     {
-      temp = num_char % radix;
+      csTmp = get_hex_vals()[num_char % radix];
       num_char = (int)floor((float)num_char / (float)radix);
-      csTmp = get_hex_vals()[temp];
     }
 
     csTmp += get_hex_vals()[num_char];
