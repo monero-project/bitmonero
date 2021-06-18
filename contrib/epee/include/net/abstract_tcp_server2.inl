@@ -97,9 +97,8 @@ PRAGMA_WARNING_DISABLE_VS(4355)
 		t_connection_type connection_type,
 		ssl_support_t ssl_support
 	)
-	: 
-		connection_basic(std::move(sock), state, ssl_support),
-		m_protocol_handler(this, check_and_get(state), context),
+	:	connection_basic(std::move(sock), state, ssl_support),
+		service_endpoint<t_protocol_handler>(check_and_get(state)),
 		buffer_ssl_init_fill(0),
 		m_connection_type( connection_type ),
 		m_throttle_speed_in("speed_in", "throttle_speed_in"),
@@ -126,16 +125,16 @@ PRAGMA_WARNING_DISABLE_VS(4355)
   }
   //---------------------------------------------------------------------------------
   template<class t_protocol_handler>
-  boost::shared_ptr<connection<t_protocol_handler> > connection<t_protocol_handler>::safe_shared_from_this()
+  std::shared_ptr<connection<t_protocol_handler>> connection<t_protocol_handler>::safe_shared_from_this() noexcept
   {
     try
     {
       return connection<t_protocol_handler>::shared_from_this();
     }
-    catch (const boost::bad_weak_ptr&)
+    catch (const std::bad_weak_ptr&)
     {
       // It happens when the connection is being deleted
-      return boost::shared_ptr<connection<t_protocol_handler> >();
+      return std::shared_ptr<connection<t_protocol_handler>>();
     }
   }
   //---------------------------------------------------------------------------------
@@ -178,7 +177,7 @@ PRAGMA_WARNING_DISABLE_VS(4355)
     // create a random uuid, we don't need crypto strength here
     const boost::uuids::uuid random_uuid = boost::uuids::random_generator()();
 
-    context = t_connection_context{};
+    auto& context = get_context() = t_connection_context{};
     bool ssl = m_ssl_support == epee::net_utils::ssl_support_t::e_ssl_support_enabled;
     context.set_details(random_uuid, std::move(real_remote), is_income, ssl);
 
@@ -190,7 +189,8 @@ PRAGMA_WARNING_DISABLE_VS(4355)
       " to " << local_ep.address().to_string() << ':' << local_ep.port() <<
       ", total sockets objects " << get_state().sock_count);
 
-    if(static_cast<shared_state&>(get_state()).pfilter && !static_cast<shared_state&>(get_state()).pfilter->is_remote_host_allowed(context.m_remote_address))
+    shared_state& state = static_cast<shared_state&>(get_state());
+    if(state.pfilter && !state.pfilter->is_remote_host_allowed(context.m_remote_address))
     {
       _dbg2("[sock " << socket().native_handle() << "] host denied " << context.m_remote_address.host_str() << ", shutdowning connection");
       close();
@@ -200,7 +200,12 @@ PRAGMA_WARNING_DISABLE_VS(4355)
     m_host = context.m_remote_address.host_str();
     try { host_count(m_host, 1); } catch(...) { /* ignore */ }
 
-    m_protocol_handler.after_init_connection();
+    if (!state.after_init_connection(self))
+    {
+      _dbg2("[" << context << "] after_init_connection failed");
+      close();
+      return false;
+    }
 
     reset_timer(boost::posix_time::milliseconds(m_local ? NEW_CONNECTION_TIMEOUT_LOCAL : NEW_CONNECTION_TIMEOUT_REMOTE), false);
 
@@ -241,7 +246,7 @@ PRAGMA_WARNING_DISABLE_VS(4355)
   bool connection<t_protocol_handler>::request_callback()
   {
     TRY_ENTRY();
-    _dbg2("[" << print_connection_context_short(context) << "] request_callback");
+    _dbg2("[" << print_connection_context_short(get_context()) << "] request_callback");
     // Use safe_shared_from_this, because of this is public method and it can be called on the object being deleted
     auto self = safe_shared_from_this();
     if(!self)
@@ -259,47 +264,11 @@ PRAGMA_WARNING_DISABLE_VS(4355)
   }
   //---------------------------------------------------------------------------------
   template<class t_protocol_handler>
-  bool connection<t_protocol_handler>::add_ref()
-  {
-    TRY_ENTRY();
-
-    // Use safe_shared_from_this, because of this is public method and it can be called on the object being deleted
-    auto self = safe_shared_from_this();
-    if(!self)
-      return false;
-    //_dbg3("[sock " << socket().native_handle() << "] add_ref, m_peer_number=" << mI->m_peer_number);
-    CRITICAL_REGION_LOCAL(self->m_self_refs_lock);
-    //_dbg3("[sock " << socket().native_handle() << "] add_ref 2, m_peer_number=" << mI->m_peer_number);
-    ++m_reference_count;
-    m_self_ref = std::move(self);
-    return true;
-    CATCH_ENTRY_L0("connection<t_protocol_handler>::add_ref()", false);
-  }
-  //---------------------------------------------------------------------------------
-  template<class t_protocol_handler>
-  bool connection<t_protocol_handler>::release()
-  {
-    TRY_ENTRY();
-    boost::shared_ptr<connection<t_protocol_handler> >  back_connection_copy;
-    LOG_TRACE_CC(context, "[sock " << socket().native_handle() << "] release");
-    CRITICAL_REGION_BEGIN(m_self_refs_lock);
-    CHECK_AND_ASSERT_MES(m_reference_count, false, "[sock " << socket().native_handle() << "] m_reference_count already at 0 at connection<t_protocol_handler>::release() call");
-    // is this the last reference?
-    if (--m_reference_count == 0) {
-        // move the held reference to a local variable, keeping the object alive until the function terminates
-        std::swap(back_connection_copy, m_self_ref);
-    }
-    CRITICAL_REGION_END();
-    return true;
-    CATCH_ENTRY_L0("connection<t_protocol_handler>::release()", false);
-  }
-  //---------------------------------------------------------------------------------
-  template<class t_protocol_handler>
   void connection<t_protocol_handler>::call_back_starter()
   {
     TRY_ENTRY();
-    _dbg2("[" << print_connection_context_short(context) << "] fired_callback");
-    m_protocol_handler.handle_qued_callback();
+    _dbg2("[" << print_connection_context_short(get_context()) << "] fired_callback");
+    get_protocol_handler().handle_qued_callback();
     CATCH_ENTRY_L0("connection<t_protocol_handler>::call_back_starter()", void());
   }
   //---------------------------------------------------------------------------------
@@ -322,7 +291,7 @@ PRAGMA_WARNING_DISABLE_VS(4355)
     }
     MDEBUG(" connection type " << to_string( m_connection_type ) << " "
         << socket().local_endpoint().address().to_string() << ":" << socket().local_endpoint().port()
-        << " <--> " << context.m_remote_address.str() << " (via " << address << ":" << port << ")");
+        << " <--> " << get_context().m_remote_address.str() << " (via " << address << ":" << port << ")");
   }
   //---------------------------------------------------------------------------------
   template<class t_protocol_handler>
@@ -343,8 +312,8 @@ PRAGMA_WARNING_DISABLE_VS(4355)
 			m_throttle_speed_in.handle_trafic_exact(bytes_transferred);
 			current_speed_down = m_throttle_speed_in.get_current_speed();
 		}
-        context.m_current_speed_down = current_speed_down;
-        context.m_max_speed_down = std::max(context.m_max_speed_down, current_speed_down);
+        get_context().m_current_speed_down = current_speed_down;
+        get_context().m_max_speed_down = std::max(get_context().m_max_speed_down, current_speed_down);
     
     {
 			CRITICAL_REGION_LOCAL(	epee::net_utils::network_throttle_manager::network_throttle_manager::m_lock_get_global_throttle_in );
@@ -376,10 +345,10 @@ PRAGMA_WARNING_DISABLE_VS(4355)
 		
       //_info("[sock " << socket().native_handle() << "] RECV " << bytes_transferred);
       logger_handle_net_read(bytes_transferred);
-      context.m_last_recv = time(NULL);
-      context.m_recv_cnt += bytes_transferred;
+      get_context().m_last_recv = time(NULL);
+      get_context().m_recv_cnt += bytes_transferred;
       m_ready_to_close = false;
-      bool recv_res = m_protocol_handler.handle_recv(buffer_.data(), bytes_transferred);
+      bool recv_res = get_protocol_handler().handle_recv(buffer_.data(), bytes_transferred);
       if(!recv_res)
       {  
         //_info("[sock " << socket().native_handle() << "] protocol_want_close");
@@ -620,12 +589,12 @@ PRAGMA_WARNING_DISABLE_VS(4355)
 		m_throttle_speed_out.handle_trafic_exact(chunk.size());
 		current_speed_up = m_throttle_speed_out.get_current_speed();
 	}
-    context.m_current_speed_up = current_speed_up;
-    context.m_max_speed_up = std::max(context.m_max_speed_up, current_speed_up);
+    get_context().m_current_speed_up = current_speed_up;
+    get_context().m_max_speed_up = std::max(get_context().m_max_speed_up, current_speed_up);
 
     //_info("[sock " << socket().native_handle() << "] SEND " << cb);
-    context.m_last_send = time(NULL);
-    context.m_send_cnt += chunk.size();
+    get_context().m_last_send = time(NULL);
+    get_context().m_send_cnt += chunk.size();
     //some data should be wrote to stream
     //request complete
     
@@ -679,7 +648,7 @@ PRAGMA_WARNING_DISABLE_VS(4355)
         MDEBUG("do_send_chunk() NOW just queues: packet="<<size_now<<" B, is added to queue-size="<<m_send_que.size());
         //do_send_handler_delayed( ptr , size_now ); // (((H))) // empty function
       
-      LOG_TRACE_CC(context, "[sock " << socket().native_handle() << "] Async send requested " << m_send_que.front().size());
+      LOG_TRACE_CC(get_context(), "[sock " << socket().native_handle() << "] Async send requested " << m_send_que.front().size());
     }
     else
     { // no active operation
@@ -789,7 +758,7 @@ PRAGMA_WARNING_DISABLE_VS(4355)
     {
       if(ec == boost::asio::error::operation_aborted)
         return;
-      MDEBUG(context << "connection timeout, closing");
+      MDEBUG(get_context() << "connection timeout, closing");
       self->close();
     });
   }
@@ -817,7 +786,7 @@ PRAGMA_WARNING_DISABLE_VS(4355)
       m_host = "";
     }
     CRITICAL_REGION_END();
-    m_protocol_handler.release_protocol();
+    get_protocol_handler().release_protocol();
     return true;
   }
   //---------------------------------------------------------------------------------
@@ -863,7 +832,7 @@ PRAGMA_WARNING_DISABLE_VS(4355)
   void connection<t_protocol_handler>::handle_write(const boost::system::error_code& e, size_t cb)
   {
     TRY_ENTRY();
-    LOG_TRACE_CC(context, "[sock " << socket().native_handle() << "] Async send calledback " << cb);
+    LOG_TRACE_CC(get_context(), "[sock " << socket().native_handle() << "] Async send calledback " << cb);
 
     if (e)
     {

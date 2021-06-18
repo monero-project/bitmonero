@@ -50,6 +50,11 @@ namespace
 
   struct test_protocol_handler_config
   {
+    template<typename T>
+    static constexpr bool after_init_connection(const std::shared_ptr<T>&) noexcept
+    {
+      return true;
+    }
   };
 
   struct test_protocol_handler
@@ -58,10 +63,6 @@ namespace
     typedef test_protocol_handler_config config_type;
 
     test_protocol_handler(epee::net_utils::i_service_endpoint* /*psnd_hndlr*/, config_type& /*config*/, connection_context& /*conn_context*/)
-    {
-    }
-
-    void after_init_connection()
     {
     }
 
@@ -167,7 +168,7 @@ TEST(test_epee_connection, test_lifetime)
 
   using handler_t = epee::levin::async_protocol_handler<context_t>;
   using connection_t = epee::net_utils::connection<handler_t>;
-  using connection_ptr = boost::shared_ptr<connection_t>;
+  using connection_ptr = std::shared_ptr<connection_t>;
   using shared_state_t = typename connection_t::shared_state;
   using shared_state_ptr = std::shared_ptr<shared_state_t>;
   using shared_states_t = std::vector<shared_state_ptr>;
@@ -181,7 +182,7 @@ TEST(test_epee_connection, test_lifetime)
   using server_t = epee::net_utils::boosted_tcp_server<handler_t>;
   using lock_t = std::mutex;
   using lock_guard_t = std::lock_guard<lock_t>;
-  using connection_weak_ptr = boost::weak_ptr<connection_t>;
+  using connection_weak_ptr = std::weak_ptr<connection_t>;
   struct shared_conn_t {
     lock_t lock;
     connection_weak_ptr conn;
@@ -222,7 +223,7 @@ TEST(test_epee_connection, test_lifetime)
     auto create_connection = [&io_context, &endpoint, &shared_state] {
         connection_ptr conn(new connection_t(io_context, shared_state, {}, {}));
         conn->socket().connect(endpoint);
-        conn->start({}, {});
+        EXPECT_TRUE(conn->start({}, {}));
         context_t context;
         conn->get_context(context);
         auto tag = context.m_connection_id;
