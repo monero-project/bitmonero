@@ -26,6 +26,7 @@
 // STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 // THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include "crypto_operators.h"
 #include "gtest/gtest.h"
 
 #include "crypto/crypto.h"
@@ -34,14 +35,6 @@ extern "C" {
 }
 #include "crypto/hash.h"
 #include <boost/algorithm/string.hpp>
-
-static inline unsigned char *operator &(crypto::ec_point &point) {
-    return &reinterpret_cast<unsigned char &>(point);
-  }
-
-static inline unsigned char *operator &(crypto::ec_scalar &scalar) {
-    return &reinterpret_cast<unsigned char &>(scalar);
-  }
 
 TEST(tx_proof, prove_verify_v2)
 {

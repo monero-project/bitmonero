@@ -137,9 +137,22 @@ if (NOT MSVC)
       COMPILE_FLAGS " -Wno-undef -Wno-sign-compare")
 endif ()
 
+monero_target_unity(unit_tests)
+
 SET_PROPERTY(SOURCE main.cpp PROPERTY COMPILE_FLAGS -DDEFAULT_DATA_DIR="\\"${CMAKE_SOURCE_DIR}/tests/data\\"")
 
 SET_PROPERTY(SOURCE memwipe.cpp PROPERTY COMPILE_FLAGS -Ofast)
+
+if (USE_UNITY)
+	# Definition required to acces private members in Unity Build for files:
+	# - long_term_block_weight.cpp
+	# - block_weight.cpp
+	# and perhaps other in the future
+	target_compile_definitions(unit_tests PRIVATE -DIN_UNIT_TESTS)
+	# Exclude logging from Unity build, since it's dependent on source file's name.
+	# This is achieved through setting an arbitrary compilation flag for the file. -O0 won't hurt.
+	SET_PROPERTY(SOURCE logging.cpp PROPERTY COMPILE_FLAGS -O0)
+endif()
 
 add_test(
   NAME    unit_tests

@@ -30,6 +30,7 @@
 #include <boost/filesystem.hpp>
 #include "gtest/gtest.h"
 
+#include "crypto_operators.h"
 #include "include_base_utils.h"
 #include "wallet/wallet2.h"
 #include "crypto/crypto.h"
