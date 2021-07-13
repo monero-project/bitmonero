@@ -1213,6 +1213,7 @@ wallet2::wallet2(network_type nettype, uint64_t kdf_rounds, bool unattended, std
 
 wallet2::~wallet2()
 {
+  m_account.deinit();
 }
 
 bool wallet2::has_testnet_option(const boost::program_options::variables_map& vm)
